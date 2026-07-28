@@ -1,0 +1,35 @@
+"""Database models."""
+import uuid
+from datetime import datetime, timezone
+
+from sqlalchemy import String, DateTime, Text, Boolean
+from sqlalchemy.orm import Mapped, mapped_column
+
+from database import Base
+
+
+def _uuid() -> str:
+    return str(uuid.uuid4())
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class LinkedInToken(Base):
+    """Stores LinkedIn OAuth access tokens."""
+    __tablename__ = "linkedin_tokens"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    access_token: Mapped[str] = mapped_column(Text, nullable=False)
+    token_type: Mapped[str] = mapped_column(String(50), default="Bearer")
+    expires_in: Mapped[int | None] = mapped_column(default=None)
+    scope: Mapped[str | None] = mapped_column(String(500), default=None)
+    person_id: Mapped[str | None] = mapped_column(String(200), default=None)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )

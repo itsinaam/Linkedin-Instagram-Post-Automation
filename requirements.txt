@@ -1,0 +1,12 @@
+python-dotenv
+fastapi
+uvicorn
+sqlalchemy
+requests
+pydantic
+psycopg2-binary
+instagrapi
+python-multipart
+instagrapi[video]
+moviepy==2.2.1
+imageio-ffmpeg
