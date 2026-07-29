@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from database import get_db, Base, engine
 from models import LinkedInToken
+from library_routes import router as library_router
 
 # Load environment variables from .env file
 load_dotenv()
@@ -19,7 +20,9 @@ load_dotenv()
 # Create tables on startup
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI()
+app = FastAPI(title="Social Media Automation API", version="1.0.0")
+
+app.include_router(library_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -437,9 +440,6 @@ async def create_instagram_post(
         raise HTTPException(status_code=400, detail=f"Instagram post failed: {str(error)}")
 
 
-# ---------------------------------------------------------------------------
-# Run directly: python main.py
-# ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
