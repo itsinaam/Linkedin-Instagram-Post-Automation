@@ -13,6 +13,9 @@
 - `/auth/linkedin/login`
 - `/auth/linkedin/callback`
 - `/linkedin/post`
+- `/auth/x/login`
+- `/auth/x/callback`
+- `/x/post`
 - `/instagram/login`
 - `/instagram/post`
 
@@ -29,6 +32,9 @@ SUPABASE_KEY
 INSTAGRAM_USERNAME
 INSTAGRAM_PASSWORD
 INSTAGRAM_SESSION_ID
+X_CLIENT_ID
+X_CLIENT_SECRET
+X_REDIRECT_URI
 ```
 
 Set `REDIRECT_URI` to the deployed callback address:
@@ -38,6 +44,19 @@ https://YOUR-PROJECT.vercel.app/auth/linkedin/callback
 ```
 
 Add the same exact production callback URL in the LinkedIn Developer Portal.
+
+For local X OAuth, configure these values in `.env`:
+
+```text
+X_CLIENT_ID=your_x_client_id
+X_CLIENT_SECRET=your_x_client_secret
+X_REDIRECT_URI=http://127.0.0.1:8000/auth/x/callback
+```
+
+In the X Developer Portal, enable OAuth 2.0 Authorization Code with PKCE, add the
+same callback URL, and enable the `tweet.read`, `tweet.write`, `users.read`, and
+`offline.access` scopes. Visit `/auth/x/login`, approve access, then submit a
+multipart request to `POST /x/post` with `caption` and `image` fields.
 
 ## 3. Important Instagram limitation
 

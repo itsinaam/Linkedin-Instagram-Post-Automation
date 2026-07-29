@@ -36,6 +36,38 @@ class LinkedInToken(Base):
 
 
 
+class XToken(Base):
+    """Stores OAuth 2.0 user tokens issued by X."""
+    __tablename__ = "x_tokens"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    access_token: Mapped[str] = mapped_column(Text, nullable=False)
+    refresh_token: Mapped[str | None] = mapped_column(Text, default=None)
+    token_type: Mapped[str] = mapped_column(String(50), default="Bearer")
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    scope: Mapped[str | None] = mapped_column(String(500), default=None)
+    x_user_id: Mapped[str | None] = mapped_column(String(100), default=None)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
+class XOAuthState(Base):
+    """Short-lived PKCE verifier storage for an X OAuth authorization attempt."""
+    __tablename__ = "x_oauth_states"
+
+    state: Mapped[str] = mapped_column(String(255), primary_key=True)
+    code_verifier: Mapped[str] = mapped_column(String(255), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now
+    )
+
+
 class Library(Base):
     __tablename__ = "library"
 

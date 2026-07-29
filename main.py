@@ -4,14 +4,18 @@ from fastapi.responses import RedirectResponse
 from urllib.parse import urlencode
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from datetime import datetime, timedelta, timezone
+import base64
+import hashlib
 import requests
 import os
+import secrets
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from database import get_db, Base, engine
-from models import LinkedInToken
+from models import LinkedInToken, XOAuthState, XToken
 from library_routes import router as library_router
 
 # Load environment variables from .env file
@@ -68,6 +72,14 @@ LINKEDIN_API_BASE = "https://api.linkedin.com"
 
 SCOPE = "openid profile email w_member_social"
 
+X_CLIENT_ID = os.getenv("X_CLIENT_ID")
+X_CLIENT_SECRET = os.getenv("X_CLIENT_SECRET")
+X_REDIRECT_URI = os.getenv("X_REDIRECT_URI")
+X_AUTH_URL = "https://x.com/i/oauth2/authorize"
+X_TOKEN_URL = "https://api.x.com/2/oauth2/token"
+X_API_BASE = "https://api.x.com/2"
+X_SCOPE = "tweet.read tweet.write users.read offline.access"
+
 
 # ---------------------------------------------------------------------------
 # Pydantic schemas
@@ -92,6 +104,183 @@ def linkedin_login():
     }
     url = f"{LINKEDIN_AUTH_URL}?{urlencode(params)}"
     return RedirectResponse(url)
+
+
+def _require_x_configuration():
+    if not X_CLIENT_ID or not X_CLIENT_SECRET:
+        raise HTTPException(
+            status_code=500,
+            detail="X_CLIENT_ID and X_CLIENT_SECRET must be configured.",
+        )
+
+
+def _x_code_challenge(code_verifier: str) -> str:
+    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+
+
+def _x_token_request(data: dict[str, str]) -> requests.Response:
+    _require_x_configuration()
+    return requests.post(
+        X_TOKEN_URL,
+        data=data,
+        auth=(X_CLIENT_ID, X_CLIENT_SECRET),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=30,
+    )
+
+
+def _x_expiry(token_data: dict) -> datetime | None:
+    expires_in = token_data.get("expires_in")
+    if expires_in is None:
+        return None
+    return datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
+
+
+def _refresh_x_token(token_record: XToken, db: Session) -> XToken:
+    if not token_record.refresh_token:
+        raise HTTPException(
+            status_code=401,
+            detail="X access token has expired. Complete GET /auth/x/login again.",
+        )
+
+    response = _x_token_request(
+        {"grant_type": "refresh_token", "refresh_token": token_record.refresh_token}
+    )
+    if response.status_code != 200:
+        token_record.is_active = False
+        db.commit()
+        raise HTTPException(
+            status_code=401,
+            detail=f"X token refresh failed. Complete GET /auth/x/login again: {response.text}",
+        )
+
+    token_data = response.json()
+    token_record.access_token = token_data["access_token"]
+    token_record.refresh_token = token_data.get("refresh_token", token_record.refresh_token)
+    token_record.token_type = token_data.get("token_type", "Bearer")
+    token_record.expires_at = _x_expiry(token_data)
+    token_record.scope = token_data.get("scope", token_record.scope)
+    db.commit()
+    db.refresh(token_record)
+    return token_record
+
+
+def _get_active_x_token(db: Session) -> XToken:
+    token_record = (
+        db.query(XToken)
+        .filter(XToken.is_active == True)
+        .order_by(XToken.created_at.desc())
+        .first()
+    )
+    if not token_record:
+        raise HTTPException(
+            status_code=401,
+            detail="No active X token found. Complete GET /auth/x/login first.",
+        )
+
+    expires_at = token_record.expires_at
+    if expires_at and expires_at <= datetime.now(timezone.utc) + timedelta(seconds=60):
+        return _refresh_x_token(token_record, db)
+    return token_record
+
+
+@app.get("/auth/x/login")
+def x_login(db: Session = Depends(get_db)):
+    """Redirect the user to X's OAuth 2.0 authorization page."""
+    _require_x_configuration()
+    state = secrets.token_urlsafe(32)
+    code_verifier = secrets.token_urlsafe(64)
+
+    db.query(XOAuthState).filter(
+        XOAuthState.expires_at < datetime.now(timezone.utc)
+    ).delete(synchronize_session=False)
+    db.add(
+        XOAuthState(
+            state=state,
+            code_verifier=code_verifier,
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+        )
+    )
+    db.commit()
+
+    query = urlencode(
+        {
+            "response_type": "code",
+            "client_id": X_CLIENT_ID,
+            "redirect_uri": X_REDIRECT_URI,
+            "scope": X_SCOPE,
+            "state": state,
+            "code_challenge": _x_code_challenge(code_verifier),
+            "code_challenge_method": "S256",
+        }
+    )
+    return RedirectResponse(f"{X_AUTH_URL}?{query}")
+
+
+@app.get("/auth/x/callback")
+def x_callback(
+    code: str = Query(...), state: str = Query(...), db: Session = Depends(get_db)
+):
+    """Exchange the X authorization code and persist the user token pair."""
+    oauth_state = db.get(XOAuthState, state)
+    if not oauth_state or oauth_state.expires_at < datetime.now(timezone.utc):
+        if oauth_state:
+            db.delete(oauth_state)
+            db.commit()
+        raise HTTPException(status_code=400, detail="Invalid or expired X OAuth state.")
+
+    response = _x_token_request(
+        {
+            "code": code,
+            "grant_type": "authorization_code",
+            "redirect_uri": X_REDIRECT_URI,
+            "code_verifier": oauth_state.code_verifier,
+        }
+    )
+    db.delete(oauth_state)
+
+    if response.status_code != 200:
+        db.commit()
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=f"X token exchange failed: {response.text}",
+        )
+
+    token_data = response.json()
+    access_token = token_data.get("access_token")
+    if not access_token:
+        db.commit()
+        raise HTTPException(status_code=400, detail="X did not return an access token.")
+
+    user_response = requests.get(
+        f"{X_API_BASE}/users/me",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=30,
+    )
+    x_user_id = None
+    if user_response.status_code == 200:
+        x_user_id = user_response.json().get("data", {}).get("id")
+
+    db.query(XToken).filter(XToken.is_active == True).update(
+        {XToken.is_active: False}
+    )
+    token_record = XToken(
+        access_token=access_token,
+        refresh_token=token_data.get("refresh_token"),
+        token_type=token_data.get("token_type", "Bearer"),
+        expires_at=_x_expiry(token_data),
+        scope=token_data.get("scope"),
+        x_user_id=x_user_id,
+    )
+    db.add(token_record)
+    db.commit()
+
+    return {
+        "message": "X account connected successfully.",
+        "x_user_id": x_user_id,
+        "expires_at": token_record.expires_at,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -438,6 +627,92 @@ async def create_instagram_post(
                 ),
             )
         raise HTTPException(status_code=400, detail=f"Instagram post failed: {str(error)}")
+
+
+# ---------------------------------------------------------------------------
+# Endpoint 6 – Create a post with an image on X
+# ---------------------------------------------------------------------------
+@app.post("/x/post")
+async def create_x_post(
+    caption: str = Form(...),
+    image: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Upload one image to X and publish a post with the supplied caption."""
+    if image.content_type and not image.content_type.startswith("image/"):
+        raise HTTPException(status_code=422, detail="X posts require an image file.")
+
+    image_bytes = await image.read()
+    if not image_bytes:
+        raise HTTPException(status_code=422, detail="The uploaded image is empty.")
+
+    token_record = _get_active_x_token(db)
+    headers = {"Authorization": f"Bearer {token_record.access_token}"}
+    media_type = image.content_type or "image/jpeg"
+
+    init_response = requests.post(
+        f"{X_API_BASE}/media/upload",
+        headers={**headers, "Content-Type": "application/json"},
+        json={
+            "media_category": "tweet_image",
+            "media_type": media_type,
+            "total_bytes": len(image_bytes),
+        },
+        timeout=60,
+    )
+    if init_response.status_code not in (200, 201, 202):
+        raise HTTPException(
+            status_code=init_response.status_code,
+            detail=f"X media initialization failed: {init_response.text}",
+        )
+
+    media_id = init_response.json().get("data", {}).get("id")
+    if not media_id:
+        raise HTTPException(status_code=400, detail="X did not return a media ID.")
+
+    append_response = requests.post(
+        f"{X_API_BASE}/media/upload/{media_id}/append",
+        headers=headers,
+        data={"segment_index": "0"},
+        files={"media": (image.filename or "image.jpg", image_bytes, media_type)},
+        timeout=60,
+    )
+    if append_response.status_code not in (200, 201, 202, 204):
+        raise HTTPException(
+            status_code=append_response.status_code,
+            detail=f"X media upload failed: {append_response.text}",
+        )
+
+    finalize_response = requests.post(
+        f"{X_API_BASE}/media/upload/{media_id}/finalize",
+        headers=headers,
+        timeout=60,
+    )
+    if finalize_response.status_code not in (200, 201, 202):
+        raise HTTPException(
+            status_code=finalize_response.status_code,
+            detail=f"X media finalization failed: {finalize_response.text}",
+        )
+
+    tweet_response = requests.post(
+        f"{X_API_BASE}/tweets",
+        headers={**headers, "Content-Type": "application/json"},
+        json={"text": caption, "media": {"media_ids": [media_id]}},
+        timeout=60,
+    )
+    if tweet_response.status_code not in (200, 201):
+        raise HTTPException(
+            status_code=tweet_response.status_code,
+            detail=f"X post creation failed: {tweet_response.text}",
+        )
+
+    tweet_data = tweet_response.json().get("data", {})
+    return {
+        "message": "X post created successfully.",
+        "post_id": tweet_data.get("id"),
+        "text": tweet_data.get("text"),
+        "media_id": media_id,
+    }
 
 
 if __name__ == "__main__":
