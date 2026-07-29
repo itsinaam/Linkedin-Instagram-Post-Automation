@@ -14,14 +14,16 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 BUCKET_NAME = "products-images"
 
 
-def upload_product_image(file_content: bytes, filename: str, content_type: str = "image/jpeg") -> str:
+def upload_library_asset(
+    file_content: bytes, filename: str, content_type: str = "application/octet-stream"
+) -> str:
     """
-    Upload an image to Supabase storage and return the public URL.
+    Upload a library asset to Supabase storage and return the public URL.
     
     Args:
-        file_content: The binary content of the image file
+        file_content: The binary content of the uploaded file
         filename: Original filename (will be made unique)
-        content_type: MIME type of the image (default: image/jpeg)
+        content_type: MIME type of the uploaded file
     
     Returns:
         Public URL of the uploaded image
@@ -48,5 +50,5 @@ def upload_product_image(file_content: bytes, filename: str, content_type: str =
         return public_url
         
     except Exception as e:
-        raise Exception(f"Failed to upload image: {str(e)}")
+        raise Exception(f"Failed to upload library asset: {str(e)}")
 

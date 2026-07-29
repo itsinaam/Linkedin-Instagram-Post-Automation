@@ -74,6 +74,7 @@ class Library(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     type: Mapped[str] = mapped_column(String(50), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(20), nullable=False, default="photo", server_default="photo")
     image_url: Mapped[str | None] = mapped_column(String(500), default=None)
     size: Mapped[int | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column( DateTime(timezone=True), default=_now )

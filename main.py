@@ -11,6 +11,7 @@ import requests
 import os
 import secrets
 from dotenv import load_dotenv
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,6 +24,14 @@ load_dotenv()
 
 # Create tables on startup
 Base.metadata.create_all(bind=engine)
+
+with engine.begin() as connection:
+    connection.execute(
+        text(
+            "ALTER TABLE library ADD COLUMN IF NOT EXISTS media_type "
+            "VARCHAR(20) NOT NULL DEFAULT 'photo'"
+        )
+    )
 
 app = FastAPI(title="Social Media Automation API", version="1.0.0")
 
