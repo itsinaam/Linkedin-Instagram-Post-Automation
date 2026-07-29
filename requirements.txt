@@ -8,5 +8,3 @@ supabase
 psycopg2-binary
 instagrapi==2.18.11
 python-multipart
-moviepy==2.2.1
-imageio-ffmpeg
