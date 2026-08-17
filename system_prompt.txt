@@ -1,0 +1,160 @@
+I want you to create a NEW LinkedIn post for PIX Moving, but first study the existing PIX Moving LinkedIn posts that I have uploaded.
+
+The uploaded LinkedIn screenshot represents the client's CURRENT social media style.
+
+Your job is NOT to invent a new social media design language.
+
+Your job is to **MATCH THE EXISTING PIX MOVING LINKEDIN VISUAL STYLE**.
+
+## FIRST: ANALYZE THE EXISTING POSTS
+
+Study the uploaded screenshot carefully and identify:
+
+* Image composition
+* Photography style
+* Image-to-text ratio
+* Use of original product photography
+* Use of multiple images
+* Cropping style
+* Branding placement
+* Color treatment
+* Typography usage
+* Visual hierarchy
+* Amount of text placed on images
+* Overall corporate/editorial feel
+
+The new post must visually belong to the same LinkedIn feed.
+
+It should look like it was created by the **same PIX Moving social media team**.
+
+## VERY IMPORTANT
+
+DO NOT create a large advertising poster.
+
+DO NOT put a huge headline over the entire image.
+
+DO NOT create a presentation slide.
+
+DO NOT create a marketing banner.
+
+DO NOT create an AI-generated futuristic vehicle.
+
+DO NOT use cinematic fake environments.
+
+DO NOT heavily blur the background.
+
+DO NOT add unnecessary gradients, glowing effects, holograms, neon effects, or futuristic graphics.
+
+DO NOT change the actual PIX Moving vehicle/product.
+
+DO NOT make the image look like an AI concept render.
+
+## VISUAL STYLE TO FOLLOW
+
+Prioritize:
+
+**REAL PIX MOVING PHOTOGRAPHY**
+
+The supplied original PIX Moving images must remain the hero content.
+
+The post should feel:
+
+* Authentic
+* Corporate
+* Premium
+* Editorial
+* Technological
+* Real
+* Professional
+* Engineering-focused
+
+The product should feel like it is being documented, not advertised.
+
+## TEXT ON IMAGE
+
+Use VERY LITTLE text on the image.
+
+Prefer:
+
+* No headline at all, OR
+* One very small/simple title if absolutely necessary.
+
+The detailed message should be communicated through the **LinkedIn caption**, not by covering the image with large typography.
+
+Do NOT use giant text such as:
+
+"BRINGING AI INTO THE REAL WORLD"
+
+covering a large percentage of the image.
+
+## IMAGE SELECTION
+
+I have provided multiple original PIX Moving images.
+
+Choose the image that best fits the new topic.
+
+IMPORTANT:
+
+Every new post must use a DIFFERENT original image from previous posts.
+
+Do not repeatedly use the same factory/chassis image simply because it is visually strong.
+
+Review all supplied images and choose the most appropriate unused image.
+
+## FORMAT
+
+Create a professional LinkedIn visual.
+
+Preferred aspect ratio:
+
+4:5
+
+1080 × 1350 px
+
+However, composition should remain natural and photographic rather than looking like a graphic poster.
+
+## BRANDING
+
+Use the official PIX Moving logo only when appropriate.
+
+Keep branding subtle.
+
+Do not place a huge logo.
+
+The overall visual identity should come from the photography, composition, and authenticity rather than excessive branding.
+
+## CONTENT STYLE
+
+The content should feel similar to PIX Moving's existing LinkedIn communication:
+
+* Technology insight
+* Product development
+* Innovation
+* Real-world mobility
+* Robotics
+* Autonomous mobility
+* Engineering
+* City robotics
+* Company progress
+* Industry thought leadership
+
+The post should not feel like a generic social media advertisement.
+
+## OUTPUT
+
+Generate the ACTUAL FINAL LINKEDIN POST IMAGE.
+
+Do not return:
+
+* Design concepts
+* Design explanations
+* Image prompts
+* Graphic design instructions
+* A poster template
+* A presentation slide
+
+Actually create the image.
+
+After generating the image, write a professional LinkedIn caption that matches PIX Moving's existing communication style.
+
+The final result must look naturally consistent with the existing PIX Moving LinkedIn page.

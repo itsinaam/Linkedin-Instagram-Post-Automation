@@ -79,3 +79,22 @@ class Library(Base):
     size: Mapped[int | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column( DateTime(timezone=True), default=_now )
     updated_at: Mapped[datetime] = mapped_column( DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class GeneratedPost(Base):
+    """Stores generated social media posts in the database."""
+    __tablename__ = "generated_posts"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    platform: Mapped[str] = mapped_column(String(50), nullable=False, default="linkedin")
+    headline: Mapped[str | None] = mapped_column(String(300), default=None)
+    subtitle: Mapped[str | None] = mapped_column(String(500), default=None)
+    caption: Mapped[str] = mapped_column(Text, nullable=False)
+    hashtags: Mapped[str] = mapped_column(Text, nullable=False)
+    image_url: Mapped[str | None] = mapped_column(String(500), default=None)
+    reference_image_id: Mapped[str | None] = mapped_column(String(100), default=None)
+    reference_image_url: Mapped[str | None] = mapped_column(String(500), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+

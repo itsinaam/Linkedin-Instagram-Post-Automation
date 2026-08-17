@@ -16,8 +16,10 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from database import get_db, Base, engine
-from models import LinkedInToken, XOAuthState, XToken
+from models import LinkedInToken, XOAuthState, XToken, GeneratedPost
 from library_routes import router as library_router
+from post_generator import generate_post_content
+
 
 # Load environment variables from .env file
 load_dotenv()
@@ -98,6 +100,13 @@ class PostCreate(BaseModel):
     hashtags: str = ""
     visibility: str = "PUBLIC"
     feedDistribution: str = "MAIN_FEED"
+
+
+class CreatePostRequest(BaseModel):
+    prompt: str
+    type: str = "linkedin"  # 'linkedin' or 'instagram'
+    image_id: str | None = None
+    auto_publish: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -724,6 +733,181 @@ async def create_x_post(
     }
 
 
+# ---------------------------------------------------------------------------
+# Endpoint 7 – Generate Post (LinkedIn / Instagram) from prompt & DB images
+# ---------------------------------------------------------------------------
+@app.post("/create-post", summary="Generate social media post from prompt & DB assets")
+async def create_post_endpoint(
+    request: CreatePostRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Generate a social media post for LinkedIn or Instagram based on user prompt.
+    - Enhances user prompt using system_prompt.txt guidelines.
+    - Uses pix_moving.txt dataset for accurate brand knowledge.
+    - Selects an existing authentic image asset from DB Library.
+    - Generates ~120-180 word caption and 5-8 relevant hashtags via Gemini AI.
+    - Optionally auto-publishes to LinkedIn or Instagram if auto_publish is set to True.
+    """
+    result = generate_post_content(
+        prompt=request.prompt,
+        platform=request.type,
+        db=db,
+        image_id=request.image_id
+    )
+
+    publish_result = None
+    if request.auto_publish:
+        platform_lower = request.type.strip().lower()
+        post_img_url = result.get("image_url") or result.get("reference_image", {}).get("url")
+        if platform_lower == "linkedin":
+            token_record = (
+                db.query(LinkedInToken)
+                .filter(LinkedInToken.is_active == True)
+                .order_by(LinkedInToken.created_at.desc())
+                .first()
+            )
+            if token_record and post_img_url:
+                try:
+                    img_resp = requests.get(post_img_url, timeout=30)
+                    if img_resp.status_code == 200:
+                        img_bytes = img_resp.content
+                        person_id = token_record.person_id
+                        access_token = token_record.access_token
+                        headers = {
+                            "Authorization": f"Bearer {access_token}",
+                            "X-Restli-Protocol-Version": "2.0.0",
+                            "LinkedIn-Version": "202607",
+                        }
+                        reg_resp = requests.post(
+                            f"{LINKEDIN_API_BASE}/rest/images?action=initializeUpload",
+                            headers={**headers, "Content-Type": "application/json"},
+                            json={"initializeUploadRequest": {"owner": f"urn:li:person:{person_id}"}},
+                        )
+                        if reg_resp.status_code in (200, 201):
+                            upload_data = reg_resp.json().get("value", {})
+                            upload_url = upload_data.get("uploadUrl")
+                            image_urn = upload_data.get("image")
+                            if upload_url and image_urn:
+                                requests.put(
+                                    upload_url,
+                                    headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/octet-stream"},
+                                    data=img_bytes,
+                                )
+                                post_body = {
+                                    "author": f"urn:li:person:{person_id}",
+                                    "commentary": result["full_post_text"],
+                                    "visibility": "PUBLIC",
+                                    "distribution": {
+                                        "feedDistribution": "MAIN_FEED",
+                                        "targetEntities": [],
+                                        "thirdPartyDistributionChannels": [],
+                                    },
+                                    "lifecycleState": "PUBLISHED",
+                                    "isReshareDisabledByAuthor": False,
+                                    "content": {"media": {"title": "Post Image", "id": image_urn}},
+                                }
+                                pub_resp = requests.post(
+                                    f"{LINKEDIN_API_BASE}/rest/posts",
+                                    headers={**headers, "Content-Type": "application/json"},
+                                    json=post_body,
+                                )
+                                if pub_resp.status_code in (200, 201):
+                                    publish_result = {
+                                        "status": "published",
+                                        "platform": "linkedin",
+                                        "response": pub_resp.json() if pub_resp.text else {}
+                                    }
+                                else:
+                                    publish_result = {"status": "failed", "platform": "linkedin", "error": pub_resp.text}
+                except Exception as ex:
+                    publish_result = {"status": "failed", "error": str(ex)}
+
+        elif platform_lower == "instagram":
+            if post_img_url:
+                try:
+                    cl = _get_instagram_client()
+                    with TemporaryDirectory() as temp_dir:
+                        temp_path = Path(temp_dir) / "image.jpg"
+                        img_resp = requests.get(post_img_url, timeout=30)
+                        if img_resp.status_code == 200:
+                            temp_path.write_bytes(img_resp.content)
+                            insta_res = cl.photo_upload(temp_path, result["full_post_text"])
+                            publish_result = {
+                                "status": "published",
+                                "platform": "instagram",
+                                "media_id": insta_res.id,
+                                "code": insta_res.code
+                            }
+                except Exception as ex:
+                    publish_result = {"status": "failed", "platform": "instagram", "error": str(ex)}
+
+    return {
+        "status": "success",
+        "id": result.get("id"),
+        "type": result["platform"],
+        "prompt": result["original_prompt"],
+        "headline": result.get("headline"),
+        "subtitle": result.get("subtitle"),
+        "caption": result["caption"],
+        "hashtags": result["hashtags"],
+        "formatted_hashtags": result["formatted_hashtags"],
+        "full_post_text": result["full_post_text"],
+        "image_url": result.get("image_url"),
+        "reference_image": result.get("reference_image"),
+        "created_at": result.get("created_at"),
+        "auto_published": True if (publish_result and publish_result.get("status") == "published") else False,
+        "publish_result": publish_result
+    }
+
+
+@app.get("/generated-posts", summary="List all generated posts saved in the database")
+def list_generated_posts(db: Session = Depends(get_db)):
+    """Fetch all generated posts saved in the database, ordered by newest first."""
+    posts = db.query(GeneratedPost).order_by(GeneratedPost.created_at.desc()).all()
+    return {
+        "count": len(posts),
+        "posts": [
+            {
+                "id": p.id,
+                "prompt": p.prompt,
+                "platform": p.platform,
+                "headline": p.headline,
+                "subtitle": p.subtitle,
+                "caption": p.caption,
+                "hashtags": p.hashtags,
+                "image_url": p.image_url,
+                "reference_image_id": p.reference_image_id,
+                "reference_image_url": p.reference_image_url,
+                "created_at": p.created_at.isoformat() if p.created_at else None
+            }
+            for p in posts
+        ]
+    }
+
+
+@app.get("/generated-posts/{post_id}", summary="Get a specific generated post by ID")
+def get_generated_post(post_id: str, db: Session = Depends(get_db)):
+    """Fetch details of a single generated post from the database by ID."""
+    p = db.get(GeneratedPost, post_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="Generated post not found")
+    return {
+        "id": p.id,
+        "prompt": p.prompt,
+        "platform": p.platform,
+        "headline": p.headline,
+        "subtitle": p.subtitle,
+        "caption": p.caption,
+        "hashtags": p.hashtags,
+        "image_url": p.image_url,
+        "reference_image_id": p.reference_image_id,
+        "reference_image_url": p.reference_image_url,
+        "created_at": p.created_at.isoformat() if p.created_at else None
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
