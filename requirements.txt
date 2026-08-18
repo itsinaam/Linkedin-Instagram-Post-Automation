@@ -8,3 +8,5 @@ supabase
 psycopg2-binary
 instagrapi==2.18.11
 python-multipart
+google-genai
+httpx
