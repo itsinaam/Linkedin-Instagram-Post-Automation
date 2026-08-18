@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import String, DateTime, Text, Boolean
+from sqlalchemy import String, DateTime, Text, Boolean, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -77,6 +77,7 @@ class Library(Base):
     media_type: Mapped[str] = mapped_column(String(20), nullable=False, default="photo", server_default="photo")
     image_url: Mapped[str | None] = mapped_column(String(500), default=None)
     size: Mapped[int | None] = mapped_column(default=None)
+    embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column( DateTime(timezone=True), default=_now )
     updated_at: Mapped[datetime] = mapped_column( DateTime(timezone=True), default=_now, onupdate=_now)
 

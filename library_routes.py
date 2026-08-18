@@ -1,3 +1,4 @@
+import logging
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
@@ -5,9 +6,11 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database import get_db
+from image_embed import generate_image_embedding_from_bytes
 from models import Library
 from storage import upload_library_asset
 
+logger = logging.getLogger("LibraryRoutes")
 
 router = APIRouter(prefix="/library", tags=["Library"])
 MEDIA_TYPES = {"photo", "video", "article"}
@@ -26,6 +29,8 @@ def serialize_library(item: Library) -> dict:
         "media_url": item.image_url,
         "size": item.size,
         "size_kb": round((item.size or 0) / 1024, 2),
+        "has_embedding": item.embedding is not None,
+        "embedding": item.embedding,
         "created_at": item.created_at.isoformat() if item.created_at else None,
         "updated_at": item.updated_at.isoformat() if item.updated_at else None,
     }
@@ -56,7 +61,7 @@ def validate_media_file(media: UploadFile, media_type: str) -> None:
             raise HTTPException(status_code=400, detail="Articles must be PDF or TXT files")
 
 
-async def upload_media(media: UploadFile, media_type: str) -> tuple[str, int]:
+async def upload_media(media: UploadFile, media_type: str) -> tuple[str, int, bytes]:
     validate_media_file(media, media_type)
 
     media_content = await media.read()
@@ -72,7 +77,7 @@ async def upload_media(media: UploadFile, media_type: str) -> tuple[str, int]:
     except Exception as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
 
-    return media_url, len(media_content)
+    return media_url, len(media_content), media_content
 
 
 def get_library_or_404(library_id: str, db: Session) -> Library:
@@ -109,13 +114,26 @@ async def create_library_item(
     db: Session = Depends(get_db),
 ):
     normalized_media_type = validate_media_type(media_type)
-    media_url, media_size = await upload_media(media, normalized_media_type)
+    media_url, media_size, media_bytes = await upload_media(media, normalized_media_type)
+
+    embedding = None
+    if normalized_media_type == "photo":
+        try:
+            embedding = generate_image_embedding_from_bytes(
+                image_bytes=media_bytes,
+                mime_type=media.content_type or "image/jpeg",
+            )
+            logger.info("Generated image embedding successfully for asset: %s", name)
+        except Exception as error:
+            logger.warning("Failed to generate image embedding for '%s': %s", name, error)
+
     library_item = Library(
         name=name,
         type=type,
         media_type=normalized_media_type,
         image_url=media_url,
         size=media_size,
+        embedding=embedding,
     )
     db.add(library_item)
     db.commit()
@@ -197,9 +215,20 @@ async def update_library_item(
             )
         library_item.media_type = normalized_media_type
     if media is not None:
-        library_item.image_url, library_item.size = await upload_media(
+        media_url, media_size, media_bytes = await upload_media(
             media, library_item.media_type
         )
+        library_item.image_url = media_url
+        library_item.size = media_size
+        if library_item.media_type == "photo":
+            try:
+                library_item.embedding = generate_image_embedding_from_bytes(
+                    image_bytes=media_bytes,
+                    mime_type=media.content_type or "image/jpeg",
+                )
+                logger.info("Updated image embedding for asset: %s", library_item.id)
+            except Exception as error:
+                logger.warning("Failed to update image embedding for asset '%s': %s", library_item.id, error)
 
     db.commit()
     db.refresh(library_item)
@@ -211,4 +240,4 @@ def delete_library_item(library_id: str, db: Session = Depends(get_db)):
     library_item = get_library_or_404(library_id, db)
     db.delete(library_item)
     db.commit()
-    return {"message": "Library item deleted successfully", "id": library_id}
+    return {"message": "Library item deleted successfully", "id": library_id}
