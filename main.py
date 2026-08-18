@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File, Form
+from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File, Form, Request
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import RedirectResponse
 from urllib.parse import urlencode
@@ -34,6 +34,13 @@ with engine.begin() as connection:
             "VARCHAR(20) NOT NULL DEFAULT 'photo'"
         )
     )
+    connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS language VARCHAR(50) DEFAULT 'English (US)'"))
+    connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS tone VARCHAR(50) DEFAULT 'Professional'"))
+    connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS date VARCHAR(50)"))
+    connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS start_time VARCHAR(50)"))
+    connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS end_time VARCHAR(50)"))
+    connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS title VARCHAR(300)"))
+    connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS ai_safety_score INT DEFAULT 98"))
 
 app = FastAPI(title="Social Media Automation API", version="1.0.0")
 
@@ -53,17 +60,18 @@ def custom_openapi():
         return app.openapi_schema
 
     schema = get_openapi(title=app.title, version=app.version, routes=app.routes)
-    operation = schema["paths"].get("/instagram/post", {}).get("post", {})
-    form_schema = operation.get("requestBody", {}).get("content", {}).get(
-        "multipart/form-data", {}
-    ).get("schema", {})
-    schema_reference = form_schema.get("$ref")
+    for endpoint_path in ["/instagram/post", "/create-post"]:
+        operation = schema["paths"].get(endpoint_path, {}).get("post", {})
+        form_schema = operation.get("requestBody", {}).get("content", {}).get(
+            "multipart/form-data", {}
+        ).get("schema", {})
+        schema_reference = form_schema.get("$ref")
 
-    if schema_reference:
-        component_name = schema_reference.rsplit("/", 1)[-1]
-        files_schema = schema["components"]["schemas"][component_name]["properties"].get("files")
-        if files_schema:
-            files_schema["items"] = {"type": "string", "format": "binary"}
+        if schema_reference:
+            component_name = schema_reference.rsplit("/", 1)[-1]
+            files_schema = schema["components"]["schemas"][component_name]["properties"].get("files")
+            if files_schema:
+                files_schema["items"] = {"type": "string", "format": "binary"}
 
     app.openapi_schema = schema
     return app.openapi_schema
@@ -104,8 +112,12 @@ class PostCreate(BaseModel):
 
 class CreatePostRequest(BaseModel):
     prompt: str
-    type: str = "linkedin"  # 'linkedin' or 'instagram'
-    image_id: str | None = None
+    type: str = "linkedin"  # 'linkedin', 'instagram', or 'x'
+    date: str | None = None
+    start_time: str | None = None
+    end_time: str | None = None
+    language: str = "English (US)"
+    tone: str = "Professional"
     auto_publish: bool = False
 
 
@@ -734,32 +746,88 @@ async def create_x_post(
 
 
 # ---------------------------------------------------------------------------
-# Endpoint 7 – Generate Post (LinkedIn / Instagram) from prompt & DB images
-# ---------------------------------------------------------------------------
-@app.post("/create-post", summary="Generate social media post from prompt & DB assets")
+
+@app.post("/generate-post", summary="Generate social media post from prompt, language, tone, timing & optional image(s)")
 async def create_post_endpoint(
-    request: CreatePostRequest,
+    request: Request,
+    prompt: str = Form(""),
+    type: str = Form("linkedin"),
+    language: str = Form("English (US)"),
+    tone: str = Form("Professional"),
+    date: str | None = Form(None),
+    start_time: str | None = Form(None),
+    end_time: str | None = Form(None),
+    auto_publish: bool = Form(False),
+    files: list[UploadFile] = File(default=[]),
     db: Session = Depends(get_db)
 ):
     """
     Generate a social media post for LinkedIn or Instagram based on user prompt.
-    - Enhances user prompt using system_prompt.txt guidelines.
-    - Uses pix_moving.txt dataset for accurate brand knowledge.
-    - Selects an existing authentic image asset from DB Library.
-    - Generates ~120-180 word caption and 5-8 relevant hashtags via Gemini AI.
-    - Optionally auto-publishes to LinkedIn or Instagram if auto_publish is set to True.
+    - Accepts prompt, language, tone, date, start_time, end_time, type (linkedin/instagram), auto_publish.
+    - User can upload single or multiple images.
+    - If no image is uploaded, selects an existing image asset from DB Library.
+    - Generates caption, headline, subtitle, and hashtags in the specified language and tone via Gemini AI.
+    - Optionally auto-publishes to LinkedIn or Instagram (Single Photo or Carousel) if auto_publish is set to True.
     """
+    content_type = request.headers.get("content-type", "")
+    uploaded_images_list: list[tuple[bytes, str]] = []
+
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+            prompt = body.get("prompt") or prompt
+            type = body.get("type") or body.get("platform") or type
+            date = body.get("date") or date
+            start_time = body.get("start_time") or start_time
+            end_time = body.get("end_time") or end_time
+            language = body.get("language") or language
+            tone = body.get("tone") or tone
+            if "auto_publish" in body:
+                auto_publish = bool(body["auto_publish"])
+        except Exception:
+            pass
+
+    # Process uploaded files list
+    if files:
+        for f in files:
+            if isinstance(f, UploadFile) and f.filename:
+                content = await f.read()
+                if content:
+                    uploaded_images_list.append((content, f.filename))
+
+    # Fallback to checking form
+    if not uploaded_images_list:
+        try:
+            form = await request.form()
+            for key, val in form.items():
+                if isinstance(val, UploadFile) and val.filename:
+                    content = await val.read()
+                    if content:
+                        uploaded_images_list.append((content, val.filename))
+        except Exception:
+            pass
+
+    if not prompt:
+        raise HTTPException(status_code=422, detail="Field 'prompt' is required.")
+
     result = generate_post_content(
-        prompt=request.prompt,
-        platform=request.type,
+        prompt=prompt,
+        platform=type,
         db=db,
-        image_id=request.image_id
+        language=language,
+        tone=tone,
+        date=date,
+        start_time=start_time,
+        end_time=end_time,
+        uploaded_images=uploaded_images_list
     )
 
     publish_result = None
-    if request.auto_publish:
-        platform_lower = request.type.strip().lower()
+    if auto_publish:
+        platform_lower = type.strip().lower()
         post_img_url = result.get("image_url") or result.get("reference_image", {}).get("url")
+        uploaded_urls = result.get("uploaded_image_urls") or []
+
         if platform_lower == "linkedin":
             token_record = (
                 db.query(LinkedInToken)
@@ -824,10 +892,30 @@ async def create_post_endpoint(
                     publish_result = {"status": "failed", "error": str(ex)}
 
         elif platform_lower == "instagram":
-            if post_img_url:
-                try:
-                    cl = _get_instagram_client()
-                    with TemporaryDirectory() as temp_dir:
+            try:
+                cl = _get_instagram_client()
+                with TemporaryDirectory() as temp_dir:
+                    media_paths = []
+                    # If multiple images were uploaded (2 to 10 images), publish as Instagram carousel album
+                    if len(uploaded_urls) >= 2:
+                        for idx, u_url in enumerate(uploaded_urls[:10]):
+                            t_path = Path(temp_dir) / f"img_{idx}.jpg"
+                            r = requests.get(u_url, timeout=30)
+                            if r.status_code == 200:
+                                t_path.write_bytes(r.content)
+                                media_paths.append(t_path)
+                        
+                        if len(media_paths) >= 2:
+                            insta_res = cl.album_upload(media_paths, result["full_post_text"])
+                            publish_result = {
+                                "status": "published",
+                                "platform": "instagram",
+                                "media_type": "carousel",
+                                "media_id": insta_res.id,
+                                "code": insta_res.code
+                            }
+
+                    if not publish_result and post_img_url:
                         temp_path = Path(temp_dir) / "image.jpg"
                         img_resp = requests.get(post_img_url, timeout=30)
                         if img_resp.status_code == 200:
@@ -836,17 +924,25 @@ async def create_post_endpoint(
                             publish_result = {
                                 "status": "published",
                                 "platform": "instagram",
+                                "media_type": "photo",
                                 "media_id": insta_res.id,
                                 "code": insta_res.code
                             }
-                except Exception as ex:
-                    publish_result = {"status": "failed", "platform": "instagram", "error": str(ex)}
+            except Exception as ex:
+                publish_result = {"status": "failed", "platform": "instagram", "error": str(ex)}
 
     return {
         "status": "success",
         "id": result.get("id"),
         "type": result["platform"],
         "prompt": result["original_prompt"],
+        "title": result.get("title"),
+        "ai_safety_score": result.get("ai_safety_score", 98),
+        "language": result.get("language"),
+        "tone": result.get("tone"),
+        "date": result.get("date"),
+        "start_time": result.get("start_time"),
+        "end_time": result.get("end_time"),
         "headline": result.get("headline"),
         "subtitle": result.get("subtitle"),
         "caption": result["caption"],
@@ -861,7 +957,7 @@ async def create_post_endpoint(
     }
 
 
-@app.get("/generated-posts", summary="List all generated posts saved in the database")
+@app.get("/generate-post", summary="List all generated posts saved in the database")
 def list_generated_posts(db: Session = Depends(get_db)):
     """Fetch all generated posts saved in the database, ordered by newest first."""
     posts = db.query(GeneratedPost).order_by(GeneratedPost.created_at.desc()).all()
@@ -870,8 +966,15 @@ def list_generated_posts(db: Session = Depends(get_db)):
         "posts": [
             {
                 "id": p.id,
+                "title": p.title,
+                "ai_safety_score": p.ai_safety_score if p.ai_safety_score is not None else 98,
                 "prompt": p.prompt,
                 "platform": p.platform,
+                "language": p.language,
+                "tone": p.tone,
+                "date": p.date,
+                "start_time": p.start_time,
+                "end_time": p.end_time,
                 "headline": p.headline,
                 "subtitle": p.subtitle,
                 "caption": p.caption,
@@ -886,7 +989,7 @@ def list_generated_posts(db: Session = Depends(get_db)):
     }
 
 
-@app.get("/generated-posts/{post_id}", summary="Get a specific generated post by ID")
+@app.get("/generate-post/{post_id}", summary="Get a specific generated post by ID")
 def get_generated_post(post_id: str, db: Session = Depends(get_db)):
     """Fetch details of a single generated post from the database by ID."""
     p = db.get(GeneratedPost, post_id)
@@ -894,8 +997,15 @@ def get_generated_post(post_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Generated post not found")
     return {
         "id": p.id,
+        "title": p.title,
+        "ai_safety_score": p.ai_safety_score if p.ai_safety_score is not None else 98,
         "prompt": p.prompt,
         "platform": p.platform,
+        "language": p.language,
+        "tone": p.tone,
+        "date": p.date,
+        "start_time": p.start_time,
+        "end_time": p.end_time,
         "headline": p.headline,
         "subtitle": p.subtitle,
         "caption": p.caption,
@@ -904,6 +1014,22 @@ def get_generated_post(post_id: str, db: Session = Depends(get_db)):
         "reference_image_id": p.reference_image_id,
         "reference_image_url": p.reference_image_url,
         "created_at": p.created_at.isoformat() if p.created_at else None
+    }
+
+
+@app.delete("/generate-post/{post_id}", summary="Delete a specific generated post by ID")
+def delete_generated_post(post_id: str, db: Session = Depends(get_db)):
+    """Delete a single generated post from the database by ID."""
+    p = db.get(GeneratedPost, post_id)
+    if not p:
+        raise HTTPException(status_code=404, detail=f"Generated post with id '{post_id}' not found")
+
+    db.delete(p)
+    db.commit()
+    return {
+        "status": "success",
+        "message": f"Generated post '{post_id}' deleted successfully.",
+        "id": post_id
     }
 
 

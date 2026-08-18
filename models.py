@@ -95,6 +95,15 @@ class GeneratedPost(Base):
     image_url: Mapped[str | None] = mapped_column(String(500), default=None)
     reference_image_id: Mapped[str | None] = mapped_column(String(100), default=None)
     reference_image_url: Mapped[str | None] = mapped_column(String(500), default=None)
+    # New fields
+    title: Mapped[str | None] = mapped_column(String(300), default=None)
+    ai_safety_score: Mapped[int | None] = mapped_column(default=98)
+    language: Mapped[str | None] = mapped_column(String(50), default="English (US)")
+    tone: Mapped[str | None] = mapped_column(String(50), default="Professional")
+    date: Mapped[str | None] = mapped_column(String(50), default=None)
+    start_time: Mapped[str | None] = mapped_column(String(50), default=None)
+    end_time: Mapped[str | None] = mapped_column(String(50), default=None)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
