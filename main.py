@@ -835,29 +835,52 @@ async def generate_post(
                         "mime_type": content_type,
                     })
 
+    type_str = (type or "linkedin").lower().strip()
+    target_platforms = []
+    if "linkedin" in type_str:
+        target_platforms.append("linkedin")
+    if "instagram" in type_str or "insta" in type_str:
+        target_platforms.append("instagram")
+    if type_str in ("all", "both"):
+        target_platforms = ["linkedin", "instagram"]
+    if not target_platforms:
+        target_platforms = ["linkedin"]
+
+    generated_posts = []
     try:
-        post_data = create_generated_post(
-            db=db,
-            prompt=prompt,
-            platform=type,
-            date=date,
-            start_time=start_time,
-            end_time=end_time,
-            tone=tone,
-            language=language,
-            custom_images_data=custom_images_data if custom_images_data else None,
-        )
+        for target_plat in target_platforms:
+            post_data = create_generated_post(
+                db=db,
+                prompt=prompt,
+                platform=target_plat,
+                date=date,
+                start_time=start_time,
+                end_time=end_time,
+                tone=tone,
+                language=language,
+                custom_images_data=custom_images_data if custom_images_data else None,
+            )
+            generated_posts.append(post_data)
     except ValueError as val_err:
         raise HTTPException(status_code=404, detail=str(val_err))
     except Exception as error:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to generate post image: {str(error)}"
+            detail=f"Failed to generate post: {str(error)}"
         )
+
+    if len(generated_posts) == 1:
+        return {
+            "status": "success",
+            "count": 1,
+            "post": generated_posts[0],
+            "posts": generated_posts
+        }
 
     return {
         "status": "success",
-        "post": post_data
+        "count": len(generated_posts),
+        "posts": generated_posts
     }
 
 @app.get("/generate-post", summary="List unapproved draft generated posts")
@@ -1357,11 +1380,14 @@ def check_and_trigger_due_posts(db: Session) -> list[dict]:
         is_due = (sched_dt_utc is not None and sched_dt_utc <= now_utc + timedelta(seconds=5))
 
         if is_due:
+            # Optimistic DB Lock: Mark as posted immediately before network upload to block parallel duplicate triggers
+            post.is_posted = True
+            db.commit()
+
             due_count += 1
             logger.info("🚀 [Scheduler Trigger] Post ID '%s' (Platform: %s) is due! (Scheduled UTC: %s, Current UTC: %s)", post.id, post.platform, sched_dt_utc, now_utc)
             try:
                 pub_res = publish_generated_post(post, db)
-                post.is_posted = True
                 post.posted_at = now_utc
                 post.post_error = None
                 db.commit()
@@ -1375,6 +1401,7 @@ def check_and_trigger_due_posts(db: Session) -> list[dict]:
                 })
             except Exception as p_err:
                 logger.error("❌ [Scheduler Error] Error publishing post ID '%s': %s", post.id, p_err)
+                post.is_posted = False
                 post.post_error = str(p_err)
                 db.commit()
                 results.append({

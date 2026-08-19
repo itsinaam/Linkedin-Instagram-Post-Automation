@@ -55,14 +55,34 @@ def generate_linkedin_caption_and_hashtags(
     image_name: str,
     tone: str | None = None,
     language: str | None = None,
+    platform: str = "linkedin",
 ) -> dict:
     """
-    Generate professional LinkedIn post caption, hashtags, and ai_safety_score using Gemini API
-    and background data from pix_moving.txt.
+    Generate professional LinkedIn or engaging Instagram post caption, hashtags, and ai_safety_score.
     """
     client = get_genai_client()
     tone_str = tone if tone else "Professional"
     lang_str = language if language else "English (US)"
+    plat_str = platform.lower().strip()
+
+    if "instagram" in plat_str or "insta" in plat_str:
+        platform_instructions = f"""
+        TARGET PLATFORM: Instagram
+        STYLE & TONE: Casual, vibrant, lifestyle-oriented B2C vibe with natural emojis.
+        CAPTION INSTRUCTIONS:
+        Write an Instagram-optimized caption in {lang_str} (1-2 engaging paragraphs). Include relevant emojis (like 🚀, 🤖, 🌆, ✨) naturally throughout the text.
+        HASHTAGS INSTRUCTIONS:
+        Generate 8-12 popular, high-reach Instagram lifestyle & tech hashtags separated by spaces (e.g. "#PIXMoving #CityRobotics #TechLifestyle #FutureMobility #RoboticsDaily #InstaTech #Innovation #SmartCities").
+        """
+    else:
+        platform_instructions = f"""
+        TARGET PLATFORM: LinkedIn
+        STYLE & TONE: Professional, corporate, engineering-focused B2B thought-leadership tone matching {tone_str}.
+        CAPTION INSTRUCTIONS:
+        Write a professional B2B LinkedIn caption in {lang_str} (1-2 clear, impactful paragraphs).
+        HASHTAGS INSTRUCTIONS:
+        Generate 5-8 relevant corporate B2B tech hashtags separated by spaces (e.g. "#PIXMoving #CityRobotics #AutonomousMobility #AI #Robotics #Engineering").
+        """
 
     prompt_text = f"""
             You are an expert Content Strategist for PIX Moving (a leading City Robotics & Autonomous Mobility company).
@@ -79,14 +99,12 @@ def generate_linkedin_caption_and_hashtags(
             LANGUAGE:
             {lang_str}
 
-            INSTRUCTIONS:
-            Generate a social media post for PIX Moving in {lang_str} matching the requested tone ({tone_str}).
-            The post should reflect PIX Moving's authentic, corporate, engineering-focused vision.
+            {platform_instructions}
 
             Return the response in JSON format with the following keys:
             - "headline": A short, impactful headline (1 line) in {lang_str}
-            - "caption": The main body text of the post (1-2 paragraphs with clear line breaks) in {lang_str}
-            - "hashtags": 5-8 relevant hashtags separated by spaces (e.g. "#PIXMoving #CityRobotics #AutonomousMobility #AI #Robotics")
+            - "caption": The main body text of the post in {lang_str}
+            - "hashtags": The hashtags separated by spaces
             - "ai_safety_score": An integer score (between 0 and 100, e.g. 90-100) evaluating content safety, brand compliance, and appropriateness.
 
             Return ONLY the JSON object. Do not include markdown code block formatting like ```json.
@@ -110,72 +128,69 @@ def generate_linkedin_caption_and_hashtags(
         except (ValueError, TypeError):
             score_val = 98
 
+        default_hashtags = "#PIXMoving #CityRobotics #TechLifestyle #InstaTech" if "instagram" in plat_str else "#PIXMoving #CityRobotics #AutonomousMobility #AI #Robotics"
+
         return {
             "headline": data.get("headline", user_prompt[:50]),
             "caption": data.get("caption", user_prompt),
-            "hashtags": data.get("hashtags", "#PIXMoving #CityRobotics #AutonomousMobility #AI #Robotics"),
+            "hashtags": data.get("hashtags", default_hashtags),
             "ai_safety_score": score_val,
         }
     except Exception as err:
         logger.warning("Failed to generate caption via Gemini: %s", err)
+        default_hashtags = "#PIXMoving #CityRobotics #TechLifestyle #InstaTech" if "instagram" in plat_str else "#PIXMoving #CityRobotics #AutonomousMobility #AI #Robotics"
         return {
             "headline": user_prompt[:50],
             "caption": f"{user_prompt}\n\nDriving innovation in autonomous mobility and city robotics with PIX Moving.",
-            "hashtags": "#PIXMoving #CityRobotics #AutonomousMobility #Robotics #Innovation",
+            "hashtags": default_hashtags,
             "ai_safety_score": 98,
         }
 
 
-def find_relevant_image_for_prompt( db: Session, prompt: str, top_k: int = 5, min_threshold: float = THRESHOLD) -> dict:
+def find_relevant_image_for_prompt(
+    db: Session,
+    prompt: str,
+    min_threshold: float = THRESHOLD,
+    top_k: int = 5,
+) -> dict:
     """
-    Generate text embedding for user prompt and find the most relevant
-    image stored in the database library using cosine similarity.
-    Only images with a similarity score >= min_threshold (default 0.20 / 20%) are returned.
+    Generate prompt text embedding and search library database for top matching reference images.
     """
-    if not prompt or not prompt.strip():
-        raise ValueError("Prompt cannot be empty.")
-
-    logger.info("Generating text embedding for prompt: '%s'", prompt)
+    logger.info("[Step 1.1] Generating text embedding for prompt: '%s'...", prompt)
     prompt_embedding = generate_text_embedding(prompt)
+    logger.info("[Step 1.1 Output] Prompt text embedding generated (%d dimensions).", len(prompt_embedding))
 
-    photo_assets = db.query(Library).filter(
-        Library.media_type == "photo",
-        Library.embedding.isnot(None)
-    ).all()
+    logger.info("[Step 1.2] Fetching all library assets from database table 'library'...")
+    assets = db.query(Library).filter(Library.embedding.is_not(None)).all()
+    logger.info("[Step 1.2 Output] Found %d library assets with valid embeddings.", len(assets))
 
-    total_scanned = len(photo_assets)
-    logger.info("Scanned %d photo assets with embeddings from database.", total_scanned)
+    if not assets:
+        logger.warning("No assets with embeddings found in database.")
+        return {
+            "total_scanned": 0,
+            "scored_candidates": [],
+            "most_relevant": None,
+            "all_matches": []
+        }
 
     scored_matches = []
-    for item in photo_assets:
-        if item.embedding and isinstance(item.embedding, list):
-            score = cosine_similarity(prompt_embedding, item.embedding)
-            rounded_score = round(score, 4)
-            logger.info(
-                "Candidate Asset -> ID: %s | Name: '%s' | Similarity Score: %.4f",
-                item.id, item.name, rounded_score
-            )
-            if rounded_score >= min_threshold:
-                scored_matches.append({
-                    "id": item.id,
-                    "name": item.name,
-                    "type": item.type,
-                    "media_type": item.media_type,
-                    "image_url": item.image_url,
-                    "size": item.size,
-                    "similarity_score": rounded_score,
-                })
+    for asset in assets:
+        if asset.embedding:
+            score = cosine_similarity(prompt_embedding, asset.embedding)
+            scored_matches.append({
+                "id": asset.id,
+                "name": asset.name,
+                "type": asset.type,
+                "media_type": asset.media_type,
+                "image_url": asset.image_url,
+                "size": asset.size,
+                "similarity_score": score,
+                "is_matched": score >= min_threshold,
+            })
 
     scored_matches.sort(key=lambda x: x["similarity_score"], reverse=True)
+    total_scanned = len(scored_matches)
     most_relevant = scored_matches[0] if scored_matches else None
-
-    if most_relevant:
-        logger.info(
-            "Selected Best Match -> ID: %s | Name: '%s' | Score: %.4f",
-            most_relevant["id"], most_relevant["name"], most_relevant["similarity_score"]
-        )
-    else:
-        logger.warning("No candidate matched the minimum threshold of %.2f", min_threshold)
 
     return {
         "total_scanned": total_scanned,
@@ -189,11 +204,18 @@ def generate_linkedin_post_image(
     images: list[dict],
     system_prompt: str,
     user_prompt: str,
+    platform: str = "linkedin",
 ) -> bytes:
     """
-    Generate a LinkedIn post image using selected reference images' bytes,
-    system prompt, and user prompt via Gemini API.
+    Generate a social post image using selected reference images' bytes,
+    system prompt, and user prompt via Gemini API tailored for target platform.
     """
+    plat_str = platform.lower().strip()
+    if "instagram" in plat_str or "insta" in plat_str:
+        style_guide = "Generate a vibrant, modern lifestyle Instagram-style post image. Focus on aesthetic lighting, urban life integration, vibrant colors, and visually appealing composition suitable for Instagram."
+    else:
+        style_guide = "Generate a clean, high-impact corporate LinkedIn-ready post image. Focus on professional engineering detail, corporate architecture, high-tech clarity, and premium brand aesthetics suitable for LinkedIn."
+
     combined_prompt = f"""
 SYSTEM INSTRUCTIONS:
 
@@ -205,7 +227,7 @@ USER REQUEST:
 
 IMPORTANT:
 
-Generate the FINAL LinkedIn post image.
+{style_guide}
 
 Use the supplied reference image(s) as the primary visual/reference image(s).
 
@@ -215,8 +237,6 @@ Preserve the original subject's appearance, proportions, structure,
 and important visual details.
 
 Follow the supplied system instructions exactly.
-
-The final output should be a professional LinkedIn-ready image.
 
 Preferred aspect ratio:
 4:5
@@ -355,6 +375,7 @@ def create_generated_post(
         image_name=image_names,
         tone=tone,
         language=language,
+        platform=platform,
     )
 
     logger.info("[Step 2 Output] Headline: '%s' | Hashtags: %s | AI Safety Score: %d", caption_data['headline'], caption_data['hashtags'], caption_data.get('ai_safety_score', 98))
@@ -385,6 +406,7 @@ def create_generated_post(
         images=images_data,
         system_prompt=system_prompt,
         user_prompt=prompt,
+        platform=platform,
     )
 
     logger.info("[Step 4 Output] Gemini post image generated successfully.")
