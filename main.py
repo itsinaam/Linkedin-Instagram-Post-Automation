@@ -1,5 +1,6 @@
 import logging
-from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File, Form, Request
+import asyncio
+from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File, Form, Request, Body
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import RedirectResponse
 from urllib.parse import urlencode
@@ -44,6 +45,12 @@ class EditPostRequest(BaseModel):
     date: str | None = None
     start_time: str | None = None
     end_time: str | None = None
+    is_approved: bool | None = None
+    is_posted: bool | None = None
+
+
+class ApprovePostRequest(BaseModel):
+    is_approved: bool = True
 
 
 # Configure Terminal Logger
@@ -74,6 +81,10 @@ with engine.begin() as connection:
     connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS end_time VARCHAR(50)"))
     connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS title VARCHAR(300)"))
     connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS ai_safety_score INT DEFAULT 98"))
+    connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT FALSE"))
+    connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS is_posted BOOLEAN DEFAULT FALSE"))
+    connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS posted_at TIMESTAMP WITH TIME ZONE"))
+    connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS post_error TEXT"))
 
 app = FastAPI(title="Social Media Automation API", version="1.0.0")
 
@@ -874,12 +885,15 @@ def list_generated_posts(db: Session = Depends(get_db)):
                 "image_url": p.image_url,
                 "reference_image_id": p.reference_image_id,
                 "reference_image_url": p.reference_image_url,
+                "is_approved": p.is_approved,
+                "is_posted": p.is_posted,
+                "posted_at": p.posted_at.isoformat() if p.posted_at else None,
+                "post_error": p.post_error,
                 "created_at": p.created_at.isoformat() if p.created_at else None
             }
             for p in posts
         ]
     }
-
 
 @app.get("/generate-post/{post_id}", summary="Get a specific generated post by ID")
 def get_generated_post(post_id: str, db: Session = Depends(get_db)):
@@ -905,9 +919,12 @@ def get_generated_post(post_id: str, db: Session = Depends(get_db)):
         "image_url": p.image_url,
         "reference_image_id": p.reference_image_id,
         "reference_image_url": p.reference_image_url,
+        "is_approved": p.is_approved,
+        "is_posted": p.is_posted,
+        "posted_at": p.posted_at.isoformat() if p.posted_at else None,
+        "post_error": p.post_error,
         "created_at": p.created_at.isoformat() if p.created_at else None
     }
-
 
 @app.delete("/generate-post/{post_id}", summary="Delete a specific generated post by ID")
 def delete_generated_post(post_id: str, db: Session = Depends(get_db)):
@@ -924,9 +941,7 @@ def delete_generated_post(post_id: str, db: Session = Depends(get_db)):
         "id": post_id
     }
 
-
 @app.put("/generate-post/{post_id}", summary="Edit caption, hashtags, and details of a generated post")
-@app.patch("/generate-post/{post_id}", summary="Edit caption, hashtags, and details of a generated post")
 def edit_generated_post(
     post_id: str,
     request: EditPostRequest,
@@ -978,13 +993,434 @@ def edit_generated_post(
             "prompt": p.prompt,
             "reference_image_id": p.reference_image_id,
             "reference_image_url": p.reference_image_url,
+            "is_approved": p.is_approved,
+            "is_posted": p.is_posted,
+            "posted_at": p.posted_at.isoformat() if p.posted_at else None,
+            "post_error": p.post_error,
             "created_at": p.created_at.isoformat() if p.created_at else None,
             "updated_at": p.updated_at.isoformat() if p.updated_at else None
         }
     }
 
+@app.post("/generate-post/approve", summary="Approve single or multiple generated posts by ID list")
+def approve_posts_batch(
+    post_ids: list[str] = Body(..., example=["id-1", "id-2"]),
+    is_approved: bool = Query(True),
+    db: Session = Depends(get_db)
+):
+    """
+    Approve single or multiple generated posts by passing a JSON list of post IDs in the request body:
+    `["id-1", "id-2"]` (for multiple posts) or `["id-1"]` (for a single post).
+    """
+    if not post_ids:
+        raise HTTPException(status_code=400, detail="post_ids list cannot be empty.")
+
+    posts = db.query(GeneratedPost).filter(GeneratedPost.id.in_(post_ids)).all()
+    found_ids = {p.id for p in posts}
+    missing_ids = [pid for pid in post_ids if pid not in found_ids]
+
+    for p in posts:
+        p.is_approved = is_approved
+
+    db.commit()
+
+    return {
+        "status": "success",
+        "message": f"Updated approval status to {is_approved} for {len(posts)} post(s).",
+        "approved_count": len(posts),
+        "approved_ids": list(found_ids),
+        "missing_ids": missing_ids,
+        "is_approved": is_approved
+    }
+
+
+@app.get("/calendar", summary="Get approved posts for the calendar view")
+def get_calendar_posts(
+    platform: str | None = None,
+    is_posted: bool | None = None,
+    db: Session = Depends(get_db)
+):
+    """Fetch posts where is_approved is True for display in the calendar view."""
+    query = db.query(GeneratedPost).filter(GeneratedPost.is_approved == True)
+    if platform:
+        query = query.filter(GeneratedPost.platform == platform.lower())
+    if is_posted is not None:
+        query = query.filter(GeneratedPost.is_posted == is_posted)
+
+    posts = query.order_by(GeneratedPost.created_at.desc()).all()
+    return {
+        "count": len(posts),
+        "posts": [
+            {
+                "id": p.id,
+                "title": p.title,
+                "headline": p.headline,
+                "subtitle": p.subtitle,
+                "caption": p.caption,
+                "hashtags": p.hashtags,
+                "prompt": p.prompt,
+                "platform": p.platform,
+                "image_url": p.image_url,
+                "date": p.date,
+                "start_time": p.start_time,
+                "end_time": p.end_time,
+                "tone": p.tone,
+                "language": p.language,
+                "ai_safety_score": p.ai_safety_score if p.ai_safety_score is not None else 98,
+                "is_approved": p.is_approved,
+                "is_posted": p.is_posted,
+                "posted_at": p.posted_at.isoformat() if p.posted_at else None,
+                "post_error": p.post_error,
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+                "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+            }
+            for p in posts
+        ]
+    }
+
+
+def publish_post_to_linkedin(post: GeneratedPost, db: Session) -> dict:
+    """Publishes an approved post to LinkedIn using stored active access token."""
+    token_record = (
+        db.query(LinkedInToken)
+        .filter(LinkedInToken.is_active == True)
+        .order_by(LinkedInToken.created_at.desc())
+        .first()
+    )
+    if not token_record:
+        raise RuntimeError("No active LinkedIn token found. Authenticate via /auth/linkedin/login first.")
+
+    person_id = token_record.person_id
+    if not person_id:
+        userinfo_resp = requests.get(
+            f"{LINKEDIN_API_BASE}/v2/userinfo",
+            headers={"Authorization": f"Bearer {token_record.access_token}"},
+            timeout=30,
+        )
+        if userinfo_resp.status_code != 200:
+            raise RuntimeError("Could not fetch LinkedIn person ID. Re-authenticate please.")
+        person_id = userinfo_resp.json().get("sub")
+        token_record.person_id = person_id
+        db.commit()
+
+    access_token = token_record.access_token
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "X-Restli-Protocol-Version": "2.0.0",
+        "LinkedIn-Version": "202607",
+    }
+
+    commentary_text = (post.caption or "").strip()
+    if post.hashtags and post.hashtags.strip():
+        hashtags_clean = post.hashtags.strip()
+        if hashtags_clean not in commentary_text:
+            commentary_text = f"{commentary_text}\n\n{hashtags_clean}"
+
+    image_urn = None
+    if post.image_url:
+        try:
+            img_res = requests.get(post.image_url, timeout=30)
+            img_res.raise_for_status()
+            image_bytes = img_res.content
+
+            register_resp = requests.post(
+                f"{LINKEDIN_API_BASE}/rest/images?action=initializeUpload",
+                headers={**headers, "Content-Type": "application/json"},
+                json={
+                    "initializeUploadRequest": {
+                        "owner": f"urn:li:person:{person_id}",
+                    }
+                },
+                timeout=30,
+            )
+            if register_resp.status_code in (200, 201):
+                upload_data = register_resp.json().get("value", {})
+                upload_url = upload_data.get("uploadUrl")
+                image_urn = upload_data.get("image")
+
+                if upload_url and image_urn:
+                    upload_headers = {
+                        "Authorization": f"Bearer {access_token}",
+                        "Content-Type": "application/octet-stream",
+                    }
+                    upload_resp = requests.put(upload_url, headers=upload_headers, data=image_bytes, timeout=60)
+                    if upload_resp.status_code not in (200, 201):
+                        image_urn = None
+        except Exception as err:
+            logger.warning("Failed to upload post image to LinkedIn, posting text only: %s", err)
+
+    post_body = {
+        "author": f"urn:li:person:{person_id}",
+        "commentary": commentary_text,
+        "visibility": "PUBLIC",
+        "distribution": {
+            "feedDistribution": "MAIN_FEED",
+            "targetEntities": [],
+            "thirdPartyDistributionChannels": [],
+        },
+        "lifecycleState": "PUBLISHED",
+        "isReshareDisabledByAuthor": False,
+    }
+
+    if image_urn:
+        post_body["content"] = {
+            "media": {
+                "title": post.title or "Post Image",
+                "id": image_urn,
+            }
+        }
+
+    response = requests.post(
+        f"{LINKEDIN_API_BASE}/rest/posts",
+        headers={**headers, "Content-Type": "application/json"},
+        json=post_body,
+        timeout=30,
+    )
+
+    if response.status_code not in (200, 201):
+        raise RuntimeError(f"LinkedIn API error ({response.status_code}): {response.text}")
+
+    return {
+        "status_code": response.status_code,
+        "image_urn": image_urn,
+        "response": response.text,
+    }
+
+
+def publish_post_to_instagram(post: GeneratedPost, db: Session) -> dict:
+    """Publishes an approved post to Instagram using instagrapi."""
+    cl = _get_instagram_client()
+
+    commentary_text = (post.caption or "").strip()
+    if post.hashtags and post.hashtags.strip():
+        hashtags_clean = post.hashtags.strip()
+        if hashtags_clean not in commentary_text:
+            commentary_text = f"{commentary_text}\n\n{hashtags_clean}"
+
+    if not post.image_url:
+        raise RuntimeError("Instagram requires an image file to publish a post.")
+
+    img_res = requests.get(post.image_url, timeout=30)
+    img_res.raise_for_status()
+    image_bytes = img_res.content
+
+    with TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir) / "insta_post.jpg"
+        temp_path.write_bytes(image_bytes)
+
+        result = cl.photo_upload(temp_path, commentary_text)
+
+    return {
+        "media_id": getattr(result, "id", str(result)),
+        "code": getattr(result, "code", str(result)),
+    }
+
+
+def publish_generated_post(post: GeneratedPost, db: Session) -> dict:
+    """Publishes a post to LinkedIn, Instagram, or both based on post.platform."""
+    platform_str = (post.platform or "linkedin").lower()
+    results = {}
+
+    # Check if LinkedIn should be targeted
+    if "linkedin" in platform_str or platform_str in ("all", "both"):
+        try:
+            res_li = publish_post_to_linkedin(post, db)
+            results["linkedin"] = {"status": "success", "details": res_li}
+        except Exception as e:
+            results["linkedin"] = {"status": "failed", "error": str(e)}
+
+    # Check if Instagram should be targeted
+    if "instagram" in platform_str or "insta" in platform_str or platform_str in ("all", "both"):
+        try:
+            res_in = publish_post_to_instagram(post, db)
+            results["instagram"] = {"status": "success", "details": res_in}
+        except Exception as e:
+            results["instagram"] = {"status": "failed", "error": str(e)}
+
+    if not results:
+        res_fallback = publish_post_to_linkedin(post, db)
+        results["linkedin"] = {"status": "success", "details": res_fallback}
+
+    failed_platforms = [k for k, v in results.items() if v["status"] == "failed"]
+    if failed_platforms and len(failed_platforms) == len(results):
+        err_messages = "; ".join([f"{k}: {v['error']}" for k, v in results.items()])
+        raise RuntimeError(f"Publish failed for platform(s) ({', '.join(failed_platforms)}): {err_messages}")
+
+    return results
+
+
+@app.post("/generate-post/{post_id}/publish", summary="Manually trigger post publication to target social platform(s)")
+def publish_generated_post_now(post_id: str, db: Session = Depends(get_db)):
+    """Triggers publication of a generated post to LinkedIn / Instagram immediately."""
+    p = db.get(GeneratedPost, post_id)
+    if not p:
+        raise HTTPException(status_code=404, detail=f"Generated post with id '{post_id}' not found")
+
+    try:
+        res = publish_generated_post(p, db)
+        p.is_posted = True
+        p.posted_at = datetime.now(timezone.utc)
+        p.post_error = None
+        db.commit()
+        db.refresh(p)
+        return {
+            "status": "success",
+            "message": f"Post published successfully to target platform(s) ({p.platform}) ✅",
+            "details": res,
+            "post_id": p.id,
+        }
+    except Exception as e:
+        p.post_error = str(e)
+        db.commit()
+        raise HTTPException(status_code=500, detail=f"Failed to publish post: {str(e)}")
+
+
+def _parse_scheduled_datetime(date_str: str | None, time_str: str | None) -> datetime | None:
+    if not date_str and not time_str:
+        return datetime.now(timezone.utc) - timedelta(seconds=10)
+
+    combined_str = ""
+    if date_str and time_str:
+        combined_str = f"{date_str.strip()} {time_str.strip()}"
+    elif date_str:
+        combined_str = date_str.strip()
+    elif time_str:
+        combined_str = time_str.strip()
+
+    formats = [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M:%SZ",
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%Y-%m-%d",
+        "%d-%m-%Y %H:%M:%S",
+        "%d-%m-%Y %H:%M",
+        "%d-%m-%Y",
+        "%I:%M %p",
+        "%H:%M",
+    ]
+
+    for fmt in formats:
+        try:
+            dt = datetime.strptime(combined_str, fmt)
+            return dt
+        except ValueError:
+            continue
+
+    try:
+        dt = datetime.fromisoformat(combined_str.replace("Z", "+00:00"))
+        return dt
+    except Exception:
+        pass
+
+    return datetime.now(timezone.utc) - timedelta(seconds=10)
+
+
+def check_and_trigger_due_posts(db: Session) -> list[dict]:
+    """
+    Checks for all approved, unposted posts whose scheduled time has arrived,
+    and publishes them to target platform(s). Returns list of execution results.
+    """
+    results = []
+    now_utc = datetime.now(timezone.utc)
+    now_local = datetime.now()
+
+    approved_posts = (
+        db.query(GeneratedPost)
+        .filter(
+            GeneratedPost.is_approved == True,
+            GeneratedPost.is_posted == False
+        )
+        .all()
+    )
+
+    logger.info("[Scheduler Check] Checking database for due approved posts... (Found %d pending approved post(s))", len(approved_posts))
+
+    due_count = 0
+    for post in approved_posts:
+        sched_dt = _parse_scheduled_datetime(post.date, post.start_time)
+        is_due = False
+
+        if sched_dt:
+            if sched_dt.tzinfo is not None:
+                is_due = (sched_dt <= now_utc + timedelta(seconds=5))
+                curr_ref = now_utc
+            else:
+                is_due = (sched_dt <= now_local + timedelta(seconds=5))
+                curr_ref = now_local
+
+        if is_due:
+            due_count += 1
+            logger.info("🚀 [Scheduler Trigger] Post ID '%s' (Platform: %s) is due! (Scheduled: %s, Current: %s)", post.id, post.platform, sched_dt, curr_ref)
+            try:
+                pub_res = publish_generated_post(post, db)
+                post.is_posted = True
+                post.posted_at = now_utc
+                post.post_error = None
+                db.commit()
+                logger.info("✅ [Scheduler Success] Successfully published post ID '%s' to platform(s) (%s)!", post.id, post.platform)
+                results.append({
+                    "post_id": post.id,
+                    "platform": post.platform,
+                    "status": "success",
+                    "published_at": now_utc.isoformat(),
+                    "details": pub_res
+                })
+            except Exception as p_err:
+                logger.error("❌ [Scheduler Error] Error publishing post ID '%s': %s", post.id, p_err)
+                post.post_error = str(p_err)
+                db.commit()
+                results.append({
+                    "post_id": post.id,
+                    "platform": post.platform,
+                    "status": "failed",
+                    "error": str(p_err)
+                })
+        else:
+            logger.info("⏳ [Scheduler Pending] Post ID '%s' scheduled for %s (Not due yet)", post.id, sched_dt)
+
+    if len(approved_posts) > 0 and due_count == 0:
+        logger.info("[Scheduler Check Complete] Approved posts found, but none are due yet.")
+
+    return results
+
+
+@app.get("/cron/check-scheduled-posts", summary="Vercel Cron endpoint to trigger due scheduled posts")
+def cron_trigger_scheduled_posts(db: Session = Depends(get_db)):
+    """Endpoint for Vercel Cron or external cron jobs to trigger due scheduled posts."""
+    results = check_and_trigger_due_posts(db)
+    return {
+        "status": "success",
+        "processed_count": len(results),
+        "results": results
+    }
+
+
+async def _scheduled_post_checker_loop():
+    logger.info("Starting automated scheduled post trigger background loop...")
+    while True:
+        try:
+            await asyncio.sleep(30)
+            db = next(get_db())
+            try:
+                check_and_trigger_due_posts(db)
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            logger.info("Scheduled post checker loop cancelled.")
+            break
+        except Exception as loop_err:
+            logger.error("Error in scheduled post checker loop: %s", loop_err)
+
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(_scheduled_post_checker_loop())
+
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 

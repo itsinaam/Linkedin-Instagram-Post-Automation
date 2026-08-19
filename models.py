@@ -105,6 +105,12 @@ class GeneratedPost(Base):
     start_time: Mapped[str | None] = mapped_column(String(50), default=None)
     end_time: Mapped[str | None] = mapped_column(String(50), default=None)
 
+    # Approval and Posting Status
+    is_approved: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    is_posted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    post_error: Mapped[str | None] = mapped_column(Text, default=None)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 

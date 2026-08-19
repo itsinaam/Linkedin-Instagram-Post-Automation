@@ -85,9 +85,9 @@ def generate_linkedin_caption_and_hashtags(
 
             Return the response in JSON format with the following keys:
             - "headline": A short, impactful headline (1 line) in {lang_str}
-            - "caption": The main body text of the post (2-4 paragraphs with clear line breaks) in {lang_str}
+            - "caption": The main body text of the post (1-2 paragraphs with clear line breaks) in {lang_str}
             - "hashtags": 5-8 relevant hashtags separated by spaces (e.g. "#PIXMoving #CityRobotics #AutonomousMobility #AI #Robotics")
-            - "ai_safety_score": An integer score (between 0 and 100, e.g. 95-100) evaluating content safety, brand compliance, and appropriateness.
+            - "ai_safety_score": An integer score (between 0 and 100, e.g. 90-100) evaluating content safety, brand compliance, and appropriateness.
 
             Return ONLY the JSON object. Do not include markdown code block formatting like ```json.
             """
@@ -247,11 +247,29 @@ Actually generate the image.
     )
 
     for candidate in response.candidates or []:
-        for part in candidate.content.parts or []:
-            if part.inline_data and part.inline_data.data:
-                return part.inline_data.data
+        if candidate.content and candidate.content.parts:
+            for part in candidate.content.parts:
+                if part.inline_data and part.inline_data.data:
+                    return part.inline_data.data
 
-    raise RuntimeError("Gemini API did not return an image.")
+    reasons = []
+    text_responses = []
+    for cand in response.candidates or []:
+        if cand.finish_reason:
+            reasons.append(str(cand.finish_reason))
+        if cand.content and cand.content.parts:
+            for p in cand.content.parts:
+                if p.text:
+                    text_responses.append(p.text)
+
+    err_msg = "Gemini API did not return an image."
+    if text_responses:
+        err_msg += f" Gemini text response: {' '.join(text_responses)}"
+    elif reasons:
+        err_msg += f" Finish reason: {', '.join(reasons)}"
+
+    logger.error("Image generation failed: %s", err_msg)
+    raise RuntimeError(err_msg)
 
 
 def create_generated_post(
@@ -407,6 +425,8 @@ def create_generated_post(
         tone=tone or "Professional",
         language=language or "English (US)",
         ai_safety_score=caption_data.get("ai_safety_score", 98),
+        is_approved=False,
+        is_posted=False,
     )
     db.add(new_post)
     db.commit()
@@ -431,5 +451,7 @@ def create_generated_post(
         "end_time": new_post.end_time,
         "tone": new_post.tone,
         "language": new_post.language,
+        "is_approved": new_post.is_approved,
+        "is_posted": new_post.is_posted,
         "created_at": new_post.created_at.isoformat() if new_post.created_at else None,
     }
