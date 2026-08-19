@@ -1275,6 +1275,10 @@ def publish_generated_post_now(post_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Failed to publish post: {str(e)}")
 
 
+TZ_OFFSET_HOURS = int(os.getenv("APP_TIMEZONE_OFFSET_HOURS", "5"))
+DEFAULT_USER_TZ = timezone(timedelta(hours=TZ_OFFSET_HOURS))
+
+
 def _parse_scheduled_datetime(date_str: str | None, time_str: str | None) -> datetime | None:
     if not date_str and not time_str:
         return datetime.now(timezone.utc) - timedelta(seconds=10)
@@ -1290,12 +1294,12 @@ def _parse_scheduled_datetime(date_str: str | None, time_str: str | None) -> dat
     formats = [
         "%Y-%m-%d %H:%M:%S",
         "%Y-%m-%d %H:%M",
+        "%d-%m-%Y %H:%M:%S",
+        "%d-%m-%Y %H:%M",
         "%Y-%m-%dT%H:%M:%S",
         "%Y-%m-%dT%H:%M:%SZ",
         "%Y-%m-%dT%H:%M:%S%z",
         "%Y-%m-%d",
-        "%d-%m-%Y %H:%M:%S",
-        "%d-%m-%Y %H:%M",
         "%d-%m-%Y",
         "%I:%M %p",
         "%H:%M",
@@ -1304,13 +1308,17 @@ def _parse_scheduled_datetime(date_str: str | None, time_str: str | None) -> dat
     for fmt in formats:
         try:
             dt = datetime.strptime(combined_str, fmt)
-            return dt
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=DEFAULT_USER_TZ)
+            return dt.astimezone(timezone.utc)
         except ValueError:
             continue
 
     try:
         dt = datetime.fromisoformat(combined_str.replace("Z", "+00:00"))
-        return dt
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=DEFAULT_USER_TZ)
+        return dt.astimezone(timezone.utc)
     except Exception:
         pass
 
@@ -1324,7 +1332,6 @@ def check_and_trigger_due_posts(db: Session) -> list[dict]:
     """
     results = []
     now_utc = datetime.now(timezone.utc)
-    now_local = datetime.now()
 
     approved_posts = (
         db.query(GeneratedPost)
@@ -1339,20 +1346,12 @@ def check_and_trigger_due_posts(db: Session) -> list[dict]:
 
     due_count = 0
     for post in approved_posts:
-        sched_dt = _parse_scheduled_datetime(post.date, post.start_time)
-        is_due = False
-
-        if sched_dt:
-            if sched_dt.tzinfo is not None:
-                is_due = (sched_dt <= now_utc + timedelta(seconds=5))
-                curr_ref = now_utc
-            else:
-                is_due = (sched_dt <= now_local + timedelta(seconds=5))
-                curr_ref = now_local
+        sched_dt_utc = _parse_scheduled_datetime(post.date, post.start_time)
+        is_due = (sched_dt_utc is not None and sched_dt_utc <= now_utc + timedelta(seconds=5))
 
         if is_due:
             due_count += 1
-            logger.info("🚀 [Scheduler Trigger] Post ID '%s' (Platform: %s) is due! (Scheduled: %s, Current: %s)", post.id, post.platform, sched_dt, curr_ref)
+            logger.info("🚀 [Scheduler Trigger] Post ID '%s' (Platform: %s) is due! (Scheduled UTC: %s, Current UTC: %s)", post.id, post.platform, sched_dt_utc, now_utc)
             try:
                 pub_res = publish_generated_post(post, db)
                 post.is_posted = True
