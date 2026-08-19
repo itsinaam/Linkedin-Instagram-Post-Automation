@@ -1,0 +1,21 @@
+name: Scheduled Social Posts Cron Trigger (Every 30 Seconds)
+
+on:
+  schedule:
+    # Triggers every minute, and loops twice with 30s sleep
+    - cron: '* * * * *'
+  workflow_dispatch:
+
+jobs:
+  trigger-cron:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Vercel Cron Endpoint Every 30 Seconds
+        run: |
+          VERCEL_URL="${{ secrets.VERCEL_APP_URL || 'https://your-app-name.vercel.app' }}"
+          echo "Ping 1 at $(date): Triggering $VERCEL_URL/cron/check-scheduled-posts..."
+          curl -s -X GET "$VERCEL_URL/cron/check-scheduled-posts"
+          echo -e "\nSleeping 30 seconds..."
+          sleep 30
+          echo "Ping 2 at $(date): Triggering $VERCEL_URL/cron/check-scheduled-posts..."
+          curl -s -X GET "$VERCEL_URL/cron/check-scheduled-posts"
