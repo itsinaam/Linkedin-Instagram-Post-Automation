@@ -860,10 +860,17 @@ async def generate_post(
         "post": post_data
     }
 
-@app.get("/generate-post", summary="List all generated posts saved in the database")
-def list_generated_posts(db: Session = Depends(get_db)):
-    """Fetch all generated posts saved in the database, ordered by newest first."""
-    posts = db.query(GeneratedPost).order_by(GeneratedPost.created_at.desc()).all()
+@app.get("/generate-post", summary="List unapproved draft generated posts")
+def list_generated_posts(
+    is_approved: bool | None = False,
+    db: Session = Depends(get_db)
+):
+    """Fetch generated posts saved in the database. Defaults to only showing unapproved posts (is_approved=False)."""
+    query = db.query(GeneratedPost)
+    if is_approved is not None:
+        query = query.filter(GeneratedPost.is_approved == is_approved)
+
+    posts = query.order_by(GeneratedPost.created_at.desc()).all()
     return {
         "count": len(posts),
         "posts": [
@@ -1377,7 +1384,7 @@ def check_and_trigger_due_posts(db: Session) -> list[dict]:
                     "error": str(p_err)
                 })
         else:
-            logger.info("⏳ [Scheduler Pending] Post ID '%s' scheduled for %s (Not due yet)", post.id, sched_dt)
+            logger.info("⏳ [Scheduler Pending] Post ID '%s' scheduled for %s (Not due yet)", post.id, sched_dt_utc)
 
     if len(approved_posts) > 0 and due_count == 0:
         logger.info("[Scheduler Check Complete] Approved posts found, but none are due yet.")
@@ -1388,12 +1395,16 @@ def check_and_trigger_due_posts(db: Session) -> list[dict]:
 @app.get("/cron/check-scheduled-posts", summary="Vercel Cron endpoint to trigger due scheduled posts")
 def cron_trigger_scheduled_posts(db: Session = Depends(get_db)):
     """Endpoint for Vercel Cron or external cron jobs to trigger due scheduled posts."""
-    results = check_and_trigger_due_posts(db)
-    return {
-        "status": "success",
-        "processed_count": len(results),
-        "results": results
-    }
+    try:
+        results = check_and_trigger_due_posts(db)
+        return {
+            "status": "success",
+            "processed_count": len(results),
+            "results": results
+        }
+    except Exception as err:
+        logger.error("Error in cron_trigger_scheduled_posts: %s", err)
+        raise HTTPException(status_code=500, detail=f"Cron trigger error: {str(err)}")
 
 
 async def _scheduled_post_checker_loop():
