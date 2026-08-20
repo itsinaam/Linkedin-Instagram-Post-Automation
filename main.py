@@ -886,12 +886,15 @@ async def generate_post(
 @app.get("/generate-post", summary="List unapproved draft generated posts")
 def list_generated_posts(
     is_approved: bool | None = False,
+    is_posted: bool | None = False,
     db: Session = Depends(get_db)
 ):
-    """Fetch generated posts saved in the database. Defaults to only showing unapproved posts (is_approved=False)."""
+    """Fetch generated posts saved in the database. Defaults to only showing unapproved and unposted posts (is_approved=False, is_posted=False)."""
     query = db.query(GeneratedPost)
     if is_approved is not None:
         query = query.filter(GeneratedPost.is_approved == is_approved)
+    if is_posted is not None:
+        query = query.filter(GeneratedPost.is_posted == is_posted)
 
     posts = query.order_by(GeneratedPost.created_at.desc()).all()
     return {
