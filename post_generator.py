@@ -212,9 +212,9 @@ def generate_linkedin_post_image(
     """
     plat_str = platform.lower().strip()
     if "instagram" in plat_str or "insta" in plat_str:
-        style_guide = "Generate a vibrant, modern lifestyle Instagram-style post image. Focus on aesthetic lighting, urban life integration, vibrant colors, and visually appealing composition suitable for Instagram."
+        style_guide = "Generate a vibrant, modern lifestyle Instagram-style post image. Focus on aesthetic lighting, urban life integration, vibrant colors, and visually appealing composition suitable for Instagram. DO NOT add any text, titles, headlines, or typography on the image itself."
     else:
-        style_guide = "Generate a clean, high-impact corporate LinkedIn-ready post image. Focus on professional engineering detail, corporate architecture, high-tech clarity, and premium brand aesthetics suitable for LinkedIn."
+        style_guide = "Generate a clean, high-impact corporate LinkedIn-ready post image. Focus on professional engineering detail, corporate architecture, high-tech clarity, and premium brand aesthetics suitable for LinkedIn. DO NOT add any text, titles, headlines, or typography on the image itself."
 
     combined_prompt = f"""
 SYSTEM INSTRUCTIONS:
@@ -228,6 +228,9 @@ USER REQUEST:
 IMPORTANT:
 
 {style_guide}
+
+CRITICAL MANDATE - NO TEXT ON IMAGE:
+DO NOT render, print, or overlay ANY text, titles, headlines, captions, labels, words, or typography on the generated image under any circumstances. The generated image must be 100% clean photography with NO text overlay whatsoever.
 
 Use the supplied reference image(s) as the primary visual/reference image(s).
 

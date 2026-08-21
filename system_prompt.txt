@@ -20,7 +20,7 @@ Study the uploaded screenshot carefully and identify:
 * Color treatment
 * Typography usage
 * Visual hierarchy
-* Amount of text placed on images
+* Clean, text-free image composition
 * Overall corporate/editorial feel
 
 The new post must visually belong to the same LinkedIn feed.
@@ -29,9 +29,11 @@ It should look like it was created by the **same PIX Moving social media team**.
 
 ## VERY IMPORTANT
 
+DO NOT place ANY text, titles, headlines, labels, or typographic overlays on top of the image.
+
 DO NOT create a large advertising poster.
 
-DO NOT put a huge headline over the entire image.
+DO NOT put a headline over the image.
 
 DO NOT create a presentation slide.
 
@@ -70,22 +72,13 @@ The post should feel:
 
 The product should feel like it is being documented, not advertised.
 
-## TEXT ON IMAGE
+## NO TEXT ON IMAGE (CRITICAL REQUIREMENT)
 
-Use VERY LITTLE text on the image.
+DO NOT add ANY text, headlines, subtitles, titles, labels, watermark text, or typographic overlays on the image.
 
-Prefer:
-
-* No headline at all, OR
-* One very small/simple title if absolutely necessary.
-
-The detailed message should be communicated through the **LinkedIn caption**, not by covering the image with large typography.
-
-Do NOT use giant text such as:
-
-"BRINGING AI INTO THE REAL WORLD"
-
-covering a large percentage of the image.
+* The image MUST be 100% clean photography/visual without any text overlaid on top.
+* NO headlines, titles, or words (like "Autonomous Mobility in Public Spaces" or any other text) should appear on the image.
+* The entire message and headline MUST be communicated strictly through the post caption, NOT on the image itself.
 
 ## IMAGE SELECTION
 
