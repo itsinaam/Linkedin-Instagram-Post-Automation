@@ -240,4 +240,4 @@ def delete_library_item(library_id: str, db: Session = Depends(get_db)):
     library_item = get_library_or_404(library_id, db)
     db.delete(library_item)
     db.commit()
-    return {"message": "Library item deleted successfully", "id": library_id}
+    return {"message": "Library item deleted successfully", "id": library_id}
