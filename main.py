@@ -74,6 +74,17 @@ with engine.begin() as connection:
         )
     )
     connection.execute(text("ALTER TABLE library ADD COLUMN IF NOT EXISTS embedding JSON"))
+    connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS company_id VARCHAR(255)"))
+    connection.execute(
+        text(
+            "ALTER TABLE generated_posts ALTER COLUMN company_id TYPE VARCHAR(255) "
+            "USING company_id::text"
+        )
+    )
+    connection.execute(
+        text("UPDATE generated_posts SET company_id = 'pix-moving' WHERE company_id IS NULL")
+    )
+    connection.execute(text("ALTER TABLE generated_posts ALTER COLUMN company_id SET DEFAULT 'pix-moving'"))
     connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS language VARCHAR(50) DEFAULT 'English (US)'"))
     connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS tone VARCHAR(50) DEFAULT 'Professional'"))
     connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS date VARCHAR(50)"))
@@ -582,8 +593,8 @@ def _get_instagram_client():
 
     from instagrapi import Client
 
-    cl = Client()
-    cl.load_settings(INSTAGRAM_SESSION_FILE)
+    cl = Client(override_app_version=True)
+    cl.load_settings(INSTAGRAM_SESSION_FILE, override_app_version=True)
     _instagram_client = cl
     return _instagram_client
 
@@ -605,14 +616,11 @@ def login_instagram():
     try:
         from instagrapi import Client
 
-        cl = Client()
-        if INSTAGRAM_SESSION_ID:
-            authenticated = cl.login_by_sessionid(INSTAGRAM_SESSION_ID)
-        else:
-            authenticated = cl.login(
-                INSTAGRAM_USERNAME,
-                INSTAGRAM_PASSWORD,
-            )
+        cl = Client(override_app_version=True)
+        authenticated = cl.login(
+            INSTAGRAM_USERNAME,
+            INSTAGRAM_PASSWORD,
+        )
 
         if not authenticated:
             raise HTTPException(status_code=401, detail="Instagram login was not accepted.")
@@ -623,6 +631,11 @@ def login_instagram():
     except HTTPException:
         raise
     except Exception as error:
+        if INSTAGRAM_SESSION_FILE.exists():
+            try:
+                INSTAGRAM_SESSION_FILE.unlink()
+            except OSError:
+                pass
         raise HTTPException(status_code=401, detail=f"Instagram login failed: {str(error)}")
 
 

@@ -435,6 +435,7 @@ def create_generated_post(
     ref_urls_str = ", ".join([img["image_url"] for img in top_images])
 
     new_post = GeneratedPost(
+        company_id=os.getenv("COMPANY_ID") or os.getenv("COMPANY_NAME") or "pix-moving",
         prompt=prompt,
         platform=platform,
         title=caption_data["headline"],

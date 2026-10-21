@@ -1,4 +1,5 @@
 """Database models."""
+import os
 import uuid
 from datetime import datetime, timezone
 
@@ -14,6 +15,11 @@ def _uuid() -> str:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _company_id() -> str:
+    value = (os.getenv("COMPANY_ID") or os.getenv("COMPANY_NAME") or "pix-moving").strip()
+    return value or "pix-moving"
 
 
 class LinkedInToken(Base):
@@ -87,6 +93,7 @@ class GeneratedPost(Base):
     __tablename__ = "generated_posts"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    company_id: Mapped[str] = mapped_column(String(255), nullable=False, default=_company_id, server_default="pix-moving")
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     platform: Mapped[str] = mapped_column(String(50), nullable=False, default="linkedin")
     headline: Mapped[str | None] = mapped_column(String(300), default=None)
