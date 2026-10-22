@@ -75,7 +75,7 @@ class XOAuthState(Base):
 
 
 class Library(Base):
-    __tablename__ = "library"
+    __tablename__ = "library-pix"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -90,7 +90,7 @@ class Library(Base):
 
 class GeneratedPost(Base):
     """Stores generated social media posts in the database."""
-    __tablename__ = "generated_posts"
+    __tablename__ = "generated_posts-pix"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     company_id: Mapped[str] = mapped_column(String(255), nullable=False, default=_company_id, server_default="pix-moving")

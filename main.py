@@ -66,36 +66,39 @@ load_dotenv()
 # Create tables on startup
 Base.metadata.create_all(bind=engine)
 
+library_table = '"library-pix"'
+generated_posts_table = '"generated_posts-pix"'
+
 with engine.begin() as connection:
     connection.execute(
         text(
-            "ALTER TABLE library ADD COLUMN IF NOT EXISTS media_type "
+            f"ALTER TABLE {library_table} ADD COLUMN IF NOT EXISTS media_type "
             "VARCHAR(20) NOT NULL DEFAULT 'photo'"
         )
     )
-    connection.execute(text("ALTER TABLE library ADD COLUMN IF NOT EXISTS embedding JSON"))
-    connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS company_id VARCHAR(255)"))
+    connection.execute(text(f"ALTER TABLE {library_table} ADD COLUMN IF NOT EXISTS embedding JSON"))
+    connection.execute(text(f"ALTER TABLE {generated_posts_table} ADD COLUMN IF NOT EXISTS company_id VARCHAR(255)"))
     connection.execute(
         text(
-            "ALTER TABLE generated_posts ALTER COLUMN company_id TYPE VARCHAR(255) "
+            f"ALTER TABLE {generated_posts_table} ALTER COLUMN company_id TYPE VARCHAR(255) "
             "USING company_id::text"
         )
     )
     connection.execute(
-        text("UPDATE generated_posts SET company_id = 'pix-moving' WHERE company_id IS NULL")
+        text(f"UPDATE {generated_posts_table} SET company_id = 'pix-moving' WHERE company_id IS NULL")
     )
-    connection.execute(text("ALTER TABLE generated_posts ALTER COLUMN company_id SET DEFAULT 'pix-moving'"))
-    connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS language VARCHAR(50) DEFAULT 'English (US)'"))
-    connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS tone VARCHAR(50) DEFAULT 'Professional'"))
-    connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS date VARCHAR(50)"))
-    connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS start_time VARCHAR(50)"))
-    connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS end_time VARCHAR(50)"))
-    connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS title VARCHAR(300)"))
-    connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS ai_safety_score INT DEFAULT 98"))
-    connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT FALSE"))
-    connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS is_posted BOOLEAN DEFAULT FALSE"))
-    connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS posted_at TIMESTAMP WITH TIME ZONE"))
-    connection.execute(text("ALTER TABLE generated_posts ADD COLUMN IF NOT EXISTS post_error TEXT"))
+    connection.execute(text(f"ALTER TABLE {generated_posts_table} ALTER COLUMN company_id SET DEFAULT 'pix-moving'"))
+    connection.execute(text(f"ALTER TABLE {generated_posts_table} ADD COLUMN IF NOT EXISTS language VARCHAR(50) DEFAULT 'English (US)'"))
+    connection.execute(text(f"ALTER TABLE {generated_posts_table} ADD COLUMN IF NOT EXISTS tone VARCHAR(50) DEFAULT 'Professional'"))
+    connection.execute(text(f"ALTER TABLE {generated_posts_table} ADD COLUMN IF NOT EXISTS date VARCHAR(50)"))
+    connection.execute(text(f"ALTER TABLE {generated_posts_table} ADD COLUMN IF NOT EXISTS start_time VARCHAR(50)"))
+    connection.execute(text(f"ALTER TABLE {generated_posts_table} ADD COLUMN IF NOT EXISTS end_time VARCHAR(50)"))
+    connection.execute(text(f"ALTER TABLE {generated_posts_table} ADD COLUMN IF NOT EXISTS title VARCHAR(300)"))
+    connection.execute(text(f"ALTER TABLE {generated_posts_table} ADD COLUMN IF NOT EXISTS ai_safety_score INT DEFAULT 98"))
+    connection.execute(text(f"ALTER TABLE {generated_posts_table} ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT FALSE"))
+    connection.execute(text(f"ALTER TABLE {generated_posts_table} ADD COLUMN IF NOT EXISTS is_posted BOOLEAN DEFAULT FALSE"))
+    connection.execute(text(f"ALTER TABLE {generated_posts_table} ADD COLUMN IF NOT EXISTS posted_at TIMESTAMP WITH TIME ZONE"))
+    connection.execute(text(f"ALTER TABLE {generated_posts_table} ADD COLUMN IF NOT EXISTS post_error TEXT"))
 
 app = FastAPI(title="Social Media Automation API", version="1.0.0")
 
